@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+   <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -1762,16 +1762,46 @@ function renderSignInScreen(){
         </div>
         <div class="panel-body" style="padding-top:10px;">
           <label class="field"><span class="lbl">Login ID (email)</span><input type="email" id="signin-email" autocomplete="username" placeholder="you@example.com"></label>
-          <label class="field"><span class="lbl">Password</span><input type="password" id="signin-pw" autocomplete="current-password"></label>
+          <label class="field"><span class="lbl">Password</span>
+            <div style="position:relative;">
+              <input type="password" id="signin-pw" autocomplete="current-password" style="padding-right:64px;">
+              <button type="button" id="signin-pw-toggle" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:1px solid var(--line-strong);border-radius:3px;font-size:10.5px;padding:3px 7px;color:var(--ink-soft);cursor:pointer;">Show</button>
+            </div>
+          </label>
+          <div id="signin-capslock" class="hint" style="color:var(--warn);min-height:16px;display:none;">⚠ Caps Lock is on</div>
           <div id="signin-error" class="hint" style="color:var(--bad);min-height:16px;margin-bottom:4px;"></div>
           <button class="btn btn-accent" id="signin-go" style="width:100%;">Sign in</button>
           <div class="hint" style="margin-top:12px;text-align:center;">New here, or forgot your password? Ask your Admin — Configuration → Users &amp; Roles.</div>
           ${!sheetsEnabled() ? `<button class="btn btn-ghost btn-sm" id="signin-connect-shared" style="width:100%;margin-top:10px;">This device isn't connected to my team's data yet</button>` : ''}
           ${(STATE.config.users.length===0 && !sheetsEnabled()) ? `<button class="btn btn-ghost btn-sm" id="signin-create-first-admin" style="width:100%;margin-top:4px;">This is a brand-new setup — create the first Admin account</button>` : ''}
+          <div style="margin-top:16px;padding-top:12px;border-top:1px dashed var(--line);text-align:center;">
+            <button class="btn btn-sm" id="signin-fill-demo" type="button">Fill demo Admin login for me (troubleshooting)</button>
+            <div class="hint" style="margin-top:4px;">Use this to test sign-in without typing — rules out typos entirely.</div>
+          </div>
         </div>
       </div>
     </div>
   `;
+  const pwToggle = document.getElementById('signin-pw-toggle');
+  pwToggle.addEventListener('click', ()=>{
+    const pwEl = document.getElementById('signin-pw');
+    const showing = pwEl.type === 'text';
+    pwEl.type = showing ? 'password' : 'text';
+    pwToggle.textContent = showing ? 'Show' : 'Hide';
+  });
+  document.getElementById('signin-fill-demo').addEventListener('click', ()=>{
+    document.getElementById('signin-email').value = 'admin@demo.assetverse';
+    document.getElementById('signin-pw').value = 'demo123';
+    document.getElementById('signin-pw').type = 'text';
+    pwToggle.textContent = 'Hide';
+    toast('Demo credentials filled in — click Sign in.', 'good');
+  });
+  const capsWarning = document.getElementById('signin-capslock');
+  document.getElementById('signin-pw').addEventListener('keyup', (e)=>{
+    if(typeof e.getModifierState === 'function'){
+      capsWarning.style.display = e.getModifierState('CapsLock') ? 'block' : 'none';
+    }
+  });
   const connectBtn = document.getElementById('signin-connect-shared');
   if(connectBtn) connectBtn.addEventListener('click', ()=>{
     openConnectSharedDbModal((ok)=>{ render(); });
