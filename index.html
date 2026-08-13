@@ -378,8 +378,8 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent-soft);bor
    ========================================================================= */
 
 /* ---------------------------- constants -------------------------------- */
-const APP_VERSION = '1.7.0';
-const BUILD_STAMP = '2026-08-13-B'; // change this any time you deploy, then check it matches on every device
+const APP_VERSION = '1.8.0';
+const BUILD_STAMP = '2026-08-13-C'; // change this any time you deploy, then check it matches on every device
 const STORAGE_KEYS = {
   config: 'fal:config',
   master: 'fal:assetMaster',
@@ -3118,8 +3118,8 @@ function renderSettingsUsers(body){
     ${isBypass ? `
     <div class="section-note" style="border-color:#e2cd9f;background:var(--accent-soft);">
       <b>You're in temporary setup access</b> — only Configuration is available right now, and no password was checked to get here.
-      Add or edit your real team below (make sure at least one real Admin account has a working email and password), then click
-      "Finish initial setup" to lock this bypass and return to normal secure sign-in for everyone, including you.
+      Add or edit your real team below (make sure at least one real Admin account has a working email and password, then click
+      Save Changes), then click "Finish initial setup" to lock this bypass and return to normal secure sign-in for everyone, including you.
       <div style="margin-top:10px;"><button class="btn btn-accent btn-sm" id="finish-setup-btn">Finish initial setup — require normal sign-in from now on</button></div>
     </div>` : ''}
     <div class="section-note">
@@ -3135,8 +3135,15 @@ function renderSettingsUsers(body){
         </div>
       </div>
     </div>
-    <div class="panel" style="margin-top:16px;"><div class="panel-head"><div><h3>Team members</h3><div class="desc">Their email is their Login ID on the sign-in screen.</div></div>
-      <button class="btn btn-accent btn-sm" id="add-user-cfg">+ Add team member</button></div>
+    <div class="panel" style="margin-top:16px;">
+      <div class="panel-head">
+        <div><h3>Team members</h3><div class="desc">Their email is their Login ID on the sign-in screen. Edit freely below, then click Save Changes once — nothing is saved until you do.</div></div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span id="users-dirty-flag" class="hint" style="display:none;color:var(--warn);">● Unsaved changes</span>
+          <button class="btn btn-accent btn-sm" id="save-users-btn">Save Changes</button>
+          <button class="btn btn-accent btn-sm" id="add-user-cfg">+ Add team member</button>
+        </div>
+      </div>
       <div class="panel-body">
         ${users.map((u,i)=>`
           <div class="field-row" style="flex-wrap:wrap;">
@@ -3152,16 +3159,37 @@ function renderSettingsUsers(body){
     </div>
   `;
   const rerender = ()=>renderSettingsUsers(body);
-  body.querySelectorAll('[data-u-name]').forEach(el=>el.addEventListener('change', ()=>{ users[el.getAttribute('data-u-name')].name = el.value; persist('config'); render(); }));
-  body.querySelectorAll('[data-u-email]').forEach(el=>el.addEventListener('change', ()=>{
-    const idx = el.getAttribute('data-u-email'); const val = el.value.trim();
-    if(val && STATE.config.users.some((u,j)=>j!=idx && String(u.email||'').toLowerCase()===val.toLowerCase())){
-      toast('Another team member already uses that email as their Login ID.', 'bad'); el.value = users[idx].email||''; return;
+  let dirty = false;
+  const dirtyFlag = document.getElementById('users-dirty-flag');
+  function markDirty(){ dirty = true; dirtyFlag.style.display = 'inline'; }
+
+  // Editing fields updates the in-memory record immediately (so typing feels
+  // instant, with no page re-render on every keystroke) but does NOT save or
+  // push to the shared database until "Save Changes" is clicked — this is
+  // what fixes both the sluggish feel and the risk of a half-typed value
+  // (e.g. an email momentarily blank mid-edit) getting saved by accident.
+  body.querySelectorAll('[data-u-name]').forEach(el=>el.addEventListener('input', ()=>{ users[el.getAttribute('data-u-name')].name = el.value; markDirty(); }));
+  body.querySelectorAll('[data-u-email]').forEach(el=>el.addEventListener('input', ()=>{ users[el.getAttribute('data-u-email')].email = el.value.trim(); markDirty(); }));
+  body.querySelectorAll('[data-u-role]').forEach(el=>el.addEventListener('change', ()=>{ users[el.getAttribute('data-u-role')].role = el.value; markDirty(); }));
+  body.querySelectorAll('[data-u-active]').forEach(el=>el.addEventListener('change', ()=>{ users[el.getAttribute('data-u-active')].active = el.checked; markDirty(); }));
+
+  async function saveUsers(){
+    // validate everything together at save time, rather than field-by-field mid-typing
+    const seen = {};
+    for(const u of users){
+      const email = String(u.email||'').trim().toLowerCase();
+      if(!email) continue;
+      if(seen[email]){ toast(`Two team members both use "${email}" as their Login ID — make each email unique before saving.`, 'bad'); return false; }
+      seen[email] = true;
     }
-    users[idx].email = val; persist('config');
-  }));
-  body.querySelectorAll('[data-u-role]').forEach(el=>el.addEventListener('change', ()=>{ users[el.getAttribute('data-u-role')].role = el.value; persist('config'); render(); }));
-  body.querySelectorAll('[data-u-active]').forEach(el=>el.addEventListener('change', ()=>{ users[el.getAttribute('data-u-active')].active = el.checked; persist('config'); }));
+    persist('config');
+    if(sheetsEnabled()) await pushUsers(); // push immediately rather than waiting on the debounce, so "Finish setup" right after Save is never racing an in-flight save
+    dirty = false; dirtyFlag.style.display = 'none';
+    toast('Saved.', 'good');
+    return true;
+  }
+  document.getElementById('save-users-btn').addEventListener('click', saveUsers);
+
   body.querySelectorAll('[data-u-reset]').forEach(el=>el.addEventListener('click', ()=>openResetPasswordModal(users[Number(el.getAttribute('data-u-reset'))])));
   body.querySelectorAll('[data-u-del]').forEach(el=>el.addEventListener('click', ()=>{
     const idx = Number(el.getAttribute('data-u-del'));
@@ -3178,10 +3206,14 @@ function renderSettingsUsers(body){
     openNewUserModal();
   });
   const finishBtn = document.getElementById('finish-setup-btn');
-  if(finishBtn) finishBtn.addEventListener('click', ()=>{
+  if(finishBtn) finishBtn.addEventListener('click', async ()=>{
+    if(dirty){
+      const ok = await saveUsers();
+      if(!ok) return;
+    }
     const hasRealAdmin = STATE.config.users.some(u=>u.role==='Admin' && u.email && u.passwordHash);
     if(!hasRealAdmin){
-      toast('Add or edit at least one real Admin account with an email and password before finishing setup.', 'bad');
+      toast('Add or edit at least one real Admin account with an email and password, click Save Changes, then try Finish again.', 'bad');
       return;
     }
     openConfirm('Finish initial setup?', 'This locks the temporary bypass permanently and returns everyone — including you — to normal secure sign-in.', ()=>{
@@ -3583,6 +3615,7 @@ async function init(){
     // sign-in.
     setInterval(async ()=>{
       if(!currentUser()) return;
+      if(STATE.session.currentUserId === '__setup_bypass__') return; // never let a background pull overwrite in-progress initial setup
       if(document.getElementById('modal-backdrop')) return;
       if(isEditingFormField()) return;
       const ok = await pullFromSheets();
