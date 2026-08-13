@@ -1,13 +1,9 @@
-   <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Asset Ledger — Physical Verification &amp; Reconciliation</title>
-<link rel="manifest" href="./manifest.json">
-<link rel="icon" href="./icon-192.png">
-<link rel="apple-touch-icon" href="./icon-192.png">
-<meta name="theme-color" content="#161a17">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -382,8 +378,8 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent-soft);bor
    ========================================================================= */
 
 /* ---------------------------- constants -------------------------------- */
-const APP_VERSION = '1.6.0';
-const BUILD_STAMP = '2026-08-13-A'; // change this any time you deploy, then check it matches on every device
+const APP_VERSION = '1.7.0';
+const BUILD_STAMP = '2026-08-13-B'; // change this any time you deploy, then check it matches on every device
 const STORAGE_KEYS = {
   config: 'fal:config',
   master: 'fal:assetMaster',
@@ -470,6 +466,7 @@ function defaultConfig(){
       'Other Equipment':15, 'Vehicles':15, 'Moulds / Dies':15,
     },
     ocrEnabled:false,
+    setupComplete:false, // true once a real Admin has been created/edited via Configuration; while false, a temporary "skip sign-in" bypass is available so initial setup is never blocked by a login problem
     roles: ['Admin', 'Book Building', 'Physical Verification', 'Reconciliation'],
     users: [
       { id:'u_admin', name:'Audit Lead', email:'admin@demo.assetverse', role:'Admin', active:true, passwordHash:'bf0c008705cb952d86d83f3be0c9a9fd18714323fc314bcbc06a8f8d155c2298', passwordSalt:'demo-salt-2026', mustChangePassword:true },
@@ -526,6 +523,9 @@ function findUserByEmail(email){
   return STATE.config.users.find(u=>String(u.email||'').trim().toLowerCase()===norm) || null;
 }
 function currentUser(){
+  if(STATE.session.currentUserId === '__setup_bypass__' && !STATE.config.setupComplete){
+    return { id:'__setup_bypass__', name:'Initial Setup', email:'', role:'Admin', active:true };
+  }
   return STATE.config.users.find(u=>u.id===STATE.session.currentUserId && u.active!==false) || null;
 }
 function currentRole(){
@@ -533,6 +533,9 @@ function currentRole(){
   return u ? u.role : null;
 }
 function accessLevel(viewId){
+  if(STATE.session.currentUserId === '__setup_bypass__' && !STATE.config.setupComplete){
+    return viewId === 'settings' ? 'full' : 'none'; // temporary setup access is Configuration-only, by design
+  }
   const role = currentRole();
   if(!role) return 'none';
   const map = ROLE_VIEW_ACCESS[role];
@@ -1778,6 +1781,11 @@ function renderSignInScreen(){
             <button class="btn btn-sm" id="signin-fill-demo" type="button">Fill demo Admin login for me (troubleshooting)</button>
             <div class="hint" style="margin-top:4px;">Use this to test sign-in without typing — rules out typos entirely.</div>
           </div>
+          ${!STATE.config.setupComplete ? `
+          <div style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--line);text-align:center;">
+            <button class="btn btn-accent btn-sm" id="signin-skip-setup" type="button">Skip sign-in — go straight to initial setup</button>
+            <div class="hint" style="margin-top:4px;">Temporary access to Configuration only, so a login problem never blocks setting up your real team. Disappears once your first real Admin is saved.</div>
+          </div>` : ''}
         </div>
       </div>
     </div>
@@ -1808,6 +1816,14 @@ function renderSignInScreen(){
   });
   const createFirstBtn = document.getElementById('signin-create-first-admin');
   if(createFirstBtn) createFirstBtn.addEventListener('click', openCreateFirstAdminModal);
+  const skipSetupBtn = document.getElementById('signin-skip-setup');
+  if(skipSetupBtn) skipSetupBtn.addEventListener('click', ()=>{
+    STATE.session.currentUserId = '__setup_bypass__';
+    persistNow('session');
+    STATE.view = 'settings'; STATE.ui.settingsTab = 'users';
+    render();
+    toast('Temporary setup access — go to Users & Roles and save your real Admin account to finish.', 'good');
+  });
   const emailInput = document.getElementById('signin-email');
   const pwInput = document.getElementById('signin-pw');
   const errorBox = document.getElementById('signin-error');
@@ -1964,7 +1980,7 @@ function renderShell(){
         <div style="margin-bottom:4px;">${esc(currentUser().role)}</div>
         ${sheetsEnabled() ? `<span class="pill good" style="margin:2px 0;">● Shared${STATE.outbox.length?` · ${STATE.outbox.length} pending`:''}</span>` : 'Data is stored on this device only, not shared automatically.'}
         <button id="btn-switch-user">Sign out</button>
-        <button id="btn-change-password">Change my password</button>
+        ${STATE.session.currentUserId!=='__setup_bypass__' ? `<button id="btn-change-password">Change my password</button>` : ''}
         ${isAdmin ? `<button id="btn-reset-demo">Reset to demo data</button>` : ''}
         <div style="opacity:.5;font-size:10px;margin-top:8px;">v${APP_VERSION} · ${BUILD_STAMP}</div>
       </div>
@@ -2001,7 +2017,8 @@ function renderShell(){
   });
   document.getElementById('menu-toggle').addEventListener('click', ()=>{ STATE.ui.sidebarOpen = !STATE.ui.sidebarOpen; document.getElementById('sidebar').classList.toggle('open'); });
   document.getElementById('btn-switch-user').addEventListener('click', switchUser);
-  document.getElementById('btn-change-password').addEventListener('click', openChangePasswordModal);
+  const changePwBtn = document.getElementById('btn-change-password');
+  if(changePwBtn) changePwBtn.addEventListener('click', openChangePasswordModal);
   const resetBtn = document.getElementById('btn-reset-demo');
   if(resetBtn) resetBtn.addEventListener('click', ()=>{
     openConfirm('Reset all data?', 'This replaces all Asset Master, Physical Verification, reconciliation and log data with the demo dataset. This cannot be undone.', ()=>{
@@ -2015,18 +2032,20 @@ function renderShell(){
 
 function openMobileAccountSheet(){
   const isAdmin = currentRole()==='Admin';
+  const isBypass = STATE.session.currentUserId === '__setup_bypass__';
   openModal(`
     <div class="modal">
       <div class="modal-head"><h3>${esc(currentUser().name)}</h3><button class="modal-close">&times;</button></div>
       <div class="modal-body">
         <div class="hint" style="margin-bottom:12px;">${esc(currentUser().role)} · ${sheetsEnabled() ? 'Shared database connected' : 'This device only'}</div>
-        <button class="btn" style="width:100%;margin-bottom:8px;" id="sheet-change-pw">Change my password</button>
+        ${!isBypass ? `<button class="btn" style="width:100%;margin-bottom:8px;" id="sheet-change-pw">Change my password</button>` : ''}
         ${isAdmin ? `<button class="btn" style="width:100%;margin-bottom:8px;" id="sheet-config">Configuration</button>` : ''}
         <button class="btn btn-danger" style="width:100%;" id="sheet-signout">Sign out</button>
       </div>
     </div>
   `, { onMount:()=>{
-    document.getElementById('sheet-change-pw').addEventListener('click', ()=>{ closeModal(); openChangePasswordModal(); });
+    const cpBtn = document.getElementById('sheet-change-pw');
+    if(cpBtn) cpBtn.addEventListener('click', ()=>{ closeModal(); openChangePasswordModal(); });
     document.getElementById('sheet-signout').addEventListener('click', ()=>{ closeModal(); switchUser(); });
     const cfgBtn = document.getElementById('sheet-config');
     if(cfgBtn) cfgBtn.addEventListener('click', ()=>{ closeModal(); STATE.view='settings'; render(); });
@@ -2051,7 +2070,10 @@ function render(){
   if(STATE.needsFirstRunChoice){ renderFirstRunChoice(); return; }
   if(!currentUser()){ renderSignInScreen(); return; }
   if(currentUser().mustChangePassword){ renderForcePasswordChange(); return; }
-  if(!canView(STATE.view)){ STATE.view = 'dashboard'; }
+  if(!canView(STATE.view)){
+    const fallback = VIEWS.find(v=>canView(v.id));
+    STATE.view = fallback ? fallback.id : STATE.view;
+  }
   renderShell();
   const content = document.getElementById('content');
   const actions = document.getElementById('topbar-actions');
@@ -3085,6 +3107,7 @@ function renderSettingsShared(body){
 function renderSettingsUsers(body){
   const users = STATE.config.users;
   const roles = STATE.config.roles;
+  const isBypass = STATE.session.currentUserId === '__setup_bypass__';
   const roleDesc = {
     'Admin':'Full access to every tab, including Configuration.',
     'Book Building':'Asset Master / FAR only (create, edit, import). Everything else is view-only.',
@@ -3092,6 +3115,13 @@ function renderSettingsUsers(body){
     'Reconciliation':'Reconciliation + Excess Asset Valuation only. Everything else is view-only.',
   };
   body.innerHTML = `
+    ${isBypass ? `
+    <div class="section-note" style="border-color:#e2cd9f;background:var(--accent-soft);">
+      <b>You're in temporary setup access</b> — only Configuration is available right now, and no password was checked to get here.
+      Add or edit your real team below (make sure at least one real Admin account has a working email and password), then click
+      "Finish initial setup" to lock this bypass and return to normal secure sign-in for everyone, including you.
+      <div style="margin-top:10px;"><button class="btn btn-accent btn-sm" id="finish-setup-btn">Finish initial setup — require normal sign-in from now on</button></div>
+    </div>` : ''}
     <div class="section-note">
       Sign-in uses a Login ID (email) and password (hashed, never stored in plain text) — a real access gate for a
       trusted internal team, though still not a substitute for enterprise-grade authentication if this tool is ever
@@ -3146,6 +3176,21 @@ function renderSettingsUsers(body){
   }));
   document.getElementById('add-user-cfg').addEventListener('click', ()=>{
     openNewUserModal();
+  });
+  const finishBtn = document.getElementById('finish-setup-btn');
+  if(finishBtn) finishBtn.addEventListener('click', ()=>{
+    const hasRealAdmin = STATE.config.users.some(u=>u.role==='Admin' && u.email && u.passwordHash);
+    if(!hasRealAdmin){
+      toast('Add or edit at least one real Admin account with an email and password before finishing setup.', 'bad');
+      return;
+    }
+    openConfirm('Finish initial setup?', 'This locks the temporary bypass permanently and returns everyone — including you — to normal secure sign-in.', ()=>{
+      STATE.config.setupComplete = true;
+      STATE.session.currentUserId = null;
+      persistNow('config'); persistNow('session');
+      toast('Setup finished — normal sign-in is now required.', 'good');
+      render();
+    });
   });
 }
 
@@ -3551,13 +3596,6 @@ async function init(){
   }
 }
 init();
-</script>
-<script>
-if('serviceWorker' in navigator && (location.protocol==='https:' || location.hostname==='localhost')){
-  window.addEventListener('load', ()=>{
-    navigator.serviceWorker.register('./sw.js').catch(()=>{});
-  });
-}
 </script>
 </body>
 </html>
