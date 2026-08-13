@@ -6,7 +6,7 @@
    Bump CACHE_NAME (e.g. to 'assetverse-v2') whenever you ship an updated
    index.html so returning users get the new version instead of a stale
    cached copy. */
-const CACHE_NAME = 'assetverse-v7';
+const CACHE_NAME = 'assetverse-v13';
 const SHELL_FILES = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (event)=>{
