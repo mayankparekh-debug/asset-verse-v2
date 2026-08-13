@@ -367,9 +367,9 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent-soft);bor
 <body>
 <div id="app"></div>
 <div id="toast-host"></div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js" defer></script>
 <script>
 /* =========================================================================
    ASSET LEDGER — Fixed Asset Physical Verification & Reconciliation Tool
@@ -378,8 +378,8 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent-soft);bor
    ========================================================================= */
 
 /* ---------------------------- constants -------------------------------- */
-const APP_VERSION = '1.8.0';
-const BUILD_STAMP = '2026-08-13-C'; // change this any time you deploy, then check it matches on every device
+const APP_VERSION = '2.0.0';
+const BUILD_STAMP = '2026-08-13-E'; // change this any time you deploy, then check it matches on every device
 const STORAGE_KEYS = {
   config: 'fal:config',
   master: 'fal:assetMaster',
@@ -607,18 +607,17 @@ function randomTempPassword(){
   return w + n;
 }
 let loginAttemptState = { count:0, lockedUntil:0 };
-/* True while someone has an input/select/textarea focused anywhere in the
-   main content area — used to stop the periodic background refresh from
-   overwriting a plain (non-modal) form mid-edit, e.g. Configuration →
-   Users & Roles. Modals are handled separately (see the modal-backdrop
-   check next to every use of this). */
+/* True while ANY input/select/textarea anywhere in the document has focus —
+   used to stop the periodic background refresh from overwriting a form
+   mid-edit. Deliberately document-wide, not scoped to #content: screens
+   like the forced password-change page replace the entire #app and have
+   no #content element at all, so a narrower check would silently fail to
+   protect exactly the screens where losing what was typed matters most. */
 function isEditingFormField(){
   const el = document.activeElement;
   if(!el) return false;
   const tag = el.tagName;
-  if(tag!=='INPUT' && tag!=='SELECT' && tag!=='TEXTAREA') return false;
-  const content = document.getElementById('content');
-  return !!(content && content.contains(el));
+  return tag==='INPUT' || tag==='SELECT' || tag==='TEXTAREA';
 }
 function loginThrottled(){
   return Date.now() < loginAttemptState.lockedUntil;
@@ -896,11 +895,26 @@ async function pullFromSheets(){
       }catch(e){}
     }
     if(Array.isArray(data.users) && data.users.length){
-      STATE.config.users = data.users.map(u=>({
-        id:u.id, name:u.name, email:u.email||'', role:u.role, active: (u.active===true || u.active==='true'),
-        passwordHash: u.passwordHash||'', passwordSalt: u.passwordSalt||'',
-        mustChangePassword: (u.mustChangePassword===true || u.mustChangePassword==='true'),
-      }));
+      let anyCorrupted = false;
+      STATE.config.users = data.users.map(u=>{
+        // Defensive: if a role value ever comes back as something other than
+        // one of the configured role names (e.g. a boolean, from a past
+        // spreadsheet-column-alignment problem), don't silently lock the
+        // account out of every screen — fall back to Admin and flag it, so
+        // whoever is signed in can see something is wrong and fix it,
+        // rather than staring at an empty sidebar with no way in.
+        let role = u.role;
+        if(typeof role !== 'string' || !STATE.config.roles.includes(role)){
+          anyCorrupted = true;
+          role = 'Admin';
+        }
+        return {
+          id:u.id, name:u.name, email:u.email||'', role, active: (u.active===true || u.active==='true'),
+          passwordHash: u.passwordHash||'', passwordSalt: u.passwordSalt||'',
+          mustChangePassword: (u.mustChangePassword===true || u.mustChangePassword==='true'),
+        };
+      });
+      if(anyCorrupted) toast('One or more team members had unreadable role data in the shared sheet and were reset to Admin as a safety net — please check Configuration → Users & Roles.', 'bad');
     }
     if(Array.isArray(data.master)) STATE.master = data.master.map(inflateMasterRow);
     if(Array.isArray(data.physical)) STATE.physical = data.physical.map(inflatePhysicalRow);
@@ -3606,7 +3620,7 @@ async function init(){
   // password screen (a re-render there would wipe whatever they'd typed) —
   // and on isEditingFormField() so it never yanks a page out from under
   // someone actively editing a plain (non-modal) form, e.g. Users & Roles.
-  setInterval(()=>{ if(currentUser() && STATE.view==='dashboard' && !document.getElementById('modal-backdrop') && !isEditingFormField()){ render(); } }, 6000);
+  setInterval(()=>{ if(currentUser() && !currentUser().mustChangePassword && STATE.view==='dashboard' && !document.getElementById('modal-backdrop') && !isEditingFormField()){ render(); } }, 6000);
 
   if(sheetsEnabled()){
     // pull the shared snapshot regularly so everyone's screens converge —
@@ -3615,11 +3629,12 @@ async function init(){
     // sign-in.
     setInterval(async ()=>{
       if(!currentUser()) return;
+      if(currentUser().mustChangePassword) return; // never disturb someone stuck on the forced password-change screen
       if(STATE.session.currentUserId === '__setup_bypass__') return; // never let a background pull overwrite in-progress initial setup
       if(document.getElementById('modal-backdrop')) return;
       if(isEditingFormField()) return;
       const ok = await pullFromSheets();
-      if(ok && currentUser() && !isEditingFormField()) render();
+      if(ok && currentUser() && !currentUser().mustChangePassword && !isEditingFormField()) render();
     }, 10000);
     // retry anything that failed to reach the shared database earlier
     setInterval(flushOutbox, 5000);
