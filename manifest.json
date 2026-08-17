@@ -1,0 +1,17 @@
+{
+  "name": "Asset Verse — Fixed Asset Verification & Reconciliation",
+  "short_name": "Asset Verse",
+  "description": "Fixed Asset Physical Verification, Book Building & Reconciliation tool",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#161a17",
+  "theme_color": "#161a17",
+  "orientation": "any",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
